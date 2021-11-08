@@ -1,0 +1,344 @@
+---
+title: "A liga Galática"
+author: "Luiz dos Santos Almeida Júnior"
+date: "01/11/2021"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+APRESENTAÇÃO:
+
+Este é um exercício lúdico baseado em dados e fatos reais, que busca mostrar a aplicação de data science na solução de problemas empresariais. Por esse motivo, nomes, valores e locais foram alterados para proteger a confidencialidade de quem cedeu os dados. Espero que esse material possa ser útil no seu caminho pelo mundo do data science. É também minha muito singela homenagem a uma das obras primas do cinema, que apaixonou, apaixona e apaixonará muitos cinéfilos. "Que a força esteja com você".
+
+EPISÓDIO I - A LIGA GALÁTICA
+PARTE 1 - ÁRVORES DA SABEDORIA
+
+Em uma galáxia muito, muito distante....
+
+Uma liga comercial se formou para prestar seus serviços aos rebeldes na sua luta contra o império. Mas a liga passa por dificuldades, apresentando oscilações muito fortes e frequentes nas vendas, sendo incapazes inclusive de gerar uma projeção orçamentária consistente. Essa dificuldade levou a liga a várias perdas devido alocação de recursos financeiros inadequados, nos recursos comerciais errados. Por exemplo, contratando a quantidade errada de colaboradores, com as qualificações erradas para ocupar postos que nada acrescentaram aos resultados, oferecendo comissões inadequadas para produtos que não trouxeram o resultado desejado, dentre outros problemas dessa natureza.
+
+Nesse contexto, com todos os mestres jedis envolvidos diretamente nas batalhas contra o império, foi designado o padawan LuiSkywalker para ajudar a liga comercial a superar seus desafios. Dessa forma o futuro da linha de suprimentos dos rebeldes estava ameaçada e com ela, toda a resistência contra as forças do mal. Não há muito tempo e algo tem de ser feito rapidamente. 
+
+A história a seguir mostra os primeiros passos do padawan na busca pelo centro do problema na liga, será que conseguirá realizar sua missão a tempo?
+
+## 0. Base de dados
+
+0.1. Importação da base de dados
+
+```{r}
+library(dplyr)
+comercio_galatico <- readxl::read_excel("c:\\Projetos\\Meus_Modelos_DS\\Base_Dados\\xlsx\\Comercio_galatico.xlsx")
+#comercio_galatico %>% kableExtra::kable() %>% kableExtra::kable_styling(bootstrap_options = "striped",
+#                                               font_size = 13,
+# 
+
+table(comercio_galatico$Motivo_Compra, comercio_galatico$Vendedor)
+base2 <- comercio_galatico %>% dplyr::group_by(Vendedor) %>%  dplyr::transmute("Soma Vendas" = sum(Valor_Venda)) %>% dplyr::distinct()
+base2
+```
+
+0.2. Dicionário de dados
+
+|Nome da Variável  |Tipo Variável     |Descrição variável                                                   |
+|:-----------------|:-----------------|:--------------------------------------------------------------------|
+|Motivo_Compra     |Categórica nominal|Necessidade do cliente intergalático que gerou a compra              |
+|Produto           |Categórica nominal|Categoria a que pertence o produto vendido                           |
+|Parceiro          |Categórica nominal|Empresa da liga interestelar que faz parceira com nossa empresa      |
+|Vendedor          |Categórica nominal|Nome do vendedor da nossa liga que realizou a venda                  |
+|Origem_Venda      |Categórica nominal|Identifica o canal de mercado que gerou a venda                      |
+|Planeta           |Categórica nominal|Planeta que gerou a necessidade pelo produto                         |
+|Ramo_Atividade    |Categórica nominal|Tipo de atividade da organização que adquiriu o produto              |
+|Valor_Venda       |Numérica          |Valor do produto vendido em Swifts, com cada swift valendo US$ 100,00|   
+
+## 1. Modelo: Árvore de decisão
+
+1.0. Divisão da base de dados
+```{r}
+divisao_inicialTree <- comercio_galatico %>% rsample::initial_split(strata = "Valor_Venda",prop=3/4)
+
+galac_treeTreino <- rsample::training(divisao_inicialTree)
+galac_treeTeste <- rsample::testing(divisao_inicialTree)
+```
+
+1.1. Reamostragens
+```{r}
+galac_treeReamostragem <- rsample::vfold_cv(galac_treeTreino, v = 10, strata ="Valor_Venda")
+```
+
+1.2. Receita do modelo da árvore 
+```{r}
+receita_galactree <- recipes::recipe(Valor_Venda ~., data = galac_treeTreino) %>% 
+  recipes::step_normalize(all_numeric_predictors()) %>% 
+  recipes::step_novel(all_nominal_predictors()) %>%
+  recipes::step_zv(all_predictors())
+```
+
+1.3. Preparação do modelo
+```{r}
+modelo_treeGalac <- parsnip::decision_tree(
+  cost_complexity = tune(), 
+  tree_depth = tune(),
+  min_n = tune()) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("rpart")
+```
+
+1.4. Preparação do workflow
+```{r}
+wf_treeGalac <- workflows::workflow() %>% 
+   workflows::add_model(modelo_treeGalac) %>% 
+   workflows::add_recipe(receita_galactree)
+```
+
+1.5. Tunagem do modelo
+```{r}
+grid_treeGalac <- dials::grid_random(
+  dials::cost_complexity(c(-10,-5)),
+  dials::tree_depth(range = c(4,8)),
+  dials::min_n(range = c(30,40)),
+  size = 20)
+```
+
+1.6. Geração do modelo
+```{r}
+tunado_treeGalac <- tune::tune_grid(
+  wf_treeGalac,
+  resample = galac_treeReamostragem,
+  grid = grid_treeGalac,
+  metrics = yardstick::metric_set(yardstick::rmse)
+)
+```
+
+1.7. Saídas do modelo
+```{r}
+workflowsets::autoplot(tunado_treeGalac)
+workflowsets::collect_metrics(tunado_treeGalac)
+```
+
+
+## 2. Modelo: Random Forest
+
+2.0. Divisão da base de dados
+```{r}
+divisao_inicialRf <- comercio_galatico %>% rsample::initial_split(strata = "Valor_Venda", prop = 3/4)
+
+galac_RfTreino <- rsample::training(divisao_inicialRf)
+galac_RfTeste <- rsample::testing(divisao_inicialRf)
+
+#apply(galac_RfTreino,MARGIN = 2,FUN = is.na) %>% apply(MARGIN = 2, FUN = sum)
+```
+
+2.1. Reamostragens
+```{r}
+galac_RfReamostragem <- rsample::vfold_cv(galac_RfTreino, v = 10, strata = "Valor_Venda")
+```
+
+2.2. Receita modelo: Random Forest
+```{r}
+receita_galacRf <- recipes::recipe(Valor_Venda ~., data = galac_RfTreino) %>% 
+  recipes::step_normalize(all_numeric_predictors()) %>% 
+  recipes::step_zv(all_predictors()) %>% 
+  recipes::step_novel(all_nominal_predictors()) %>% 
+  recipes::step_impute_mode(all_nominal_predictors())
+
+bake(prep(receita_galacRf), new_data = NULL)
+```
+
+2.3. Preparação do modelo
+```{r}
+modelo_RfGalac <- parsnip::rand_forest(
+  trees = tune(),
+  mtry = tune(),
+  min_n = tune()
+) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("randomForest")
+```
+
+2.4. Preparação do workflow
+```{r}
+wf_RfGalac <- workflows::workflow() %>% 
+  workflows::add_model(modelo_RfGalac) %>% 
+  workflows::add_recipe(receita_galacRf)
+```
+
+2.5 Tunagem do modelo
+```{r}
+grid_RfModelo <- dials::grid_random(
+  dials::trees(range = c(200,1000)),
+  dials::mtry(range = c(2,4)),
+  dials::min_n(range = c(10,20))
+)
+```
+
+2.6. Geração do modelo
+```{r}
+tunado_RfGalac <- tune_grid(
+  wf_RfGalac,
+  resamples = galac_RfReamostragem,
+  grid = grid_RfModelo,
+  metrics = yardstick::metric_set(yardstick::rmse)
+)
+```
+
+2.7. Saídas do modelo
+```{r}
+workflowsets::autoplot(tunado_RfGalac)
+workflowsets::collect_metrics(tunado_RfGalac)
+```
+
+## 3. Modelo gradient boosting
+
+3.0 Divisão da base de dados
+```{r}
+divisao_inicialBoost <- comercio_galatico %>% rsample::initial_split(strata = "Valor_Venda", prop = 3/4)
+
+galac_BstTreino <- rsample::training(divisao_inicialBoost)
+galac_BstTeste <- rsample::testing(divisao_inicialBoost)
+```
+
+3.1 Reamostragens
+```{r}
+galac_BstReamostragem <- rsample::vfold_cv(data = galac_BstTreino, v = 10, strata = "Valor_Venda")
+```
+
+3.2 Receita modelo: Xgboost
+```{r}
+receita_galacBst <- recipes::recipe(Valor_Venda ~., data = galac_BstTreino) %>% 
+  recipes::step_normalize(all_numeric()) %>% 
+  recipes::step_zv(all_predictors()) %>% 
+  recipes::step_novel(all_nominal_predictors()) %>%
+  recipes::step_dummy(all_nominal_predictors()) %>% 
+  recipes::step_impute_mode(all_nominal_predictors())
+bake(prep(receita_galacBst),new_data = NULL)
+```
+
+3.3 Preparação do modelo
+```{r}
+modelo_Bstgalac <- parsnip::boost_tree(
+  mtry = tune(),       #Número de preditores que serão sorteados a cada divisão.
+  trees = tune(),      #Número de árvores do empilhamento do modelo.
+  min_n = tune(),      #Número mínimo de observações em um nó para ser dividido.
+  tree_depth = tune(), #Número máximo de profundidade da árvores.
+  learn_rate = tune(), #Taxa de apredizagem do algorítimo a cada iteração.
+  stop_iter = tune()   #Número de iterações sem aprendizagem antes de parar.
+) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("xgboost")
+```
+
+3.4 Preparação do workflow
+```{r}
+wf_Bstgalac <- workflows::workflow() %>% 
+  workflows::add_model(modelo_Bstgalac) %>% 
+  workflows::add_recipe(receita_galacBst)
+```
+
+3.5 Tunagem do modelo
+```{r}
+grid_BstModelo <- dials::grid_random(
+  dials::mtry(range = c(35,100)),
+  dials::trees(range = c(500,1000)),
+  dials::min_n(range = c(15,25)),
+  dials::tree_depth(range = c(5,20)),
+  dials::learn_rate(range = c(-4,0)),
+  dials::stop_iter(range = c(2,772))
+)
+```
+
+3.6 Geração do modelo
+```{r}
+tunado_Bstgalac <- tune::tune_grid(
+  wf_Bstgalac,
+  resample = galac_BstReamostragem,
+  grid = grid_BstModelo,
+  metrics = yardstick::metric_set(yardstick::rmse)
+)
+```
+
+3.7 Saídas do modelo
+```{r}
+workflowsets::autoplot(tunado_Bstgalac)
+workflowsets::collect_metrics(tunado_Bstgalac)
+tune::select_best(tunado_Bstgalac,"rmse")
+```
+
+
+## 4. Desempenho final dos modelos
+
+4.0. Seleção parâmetros das árvores 
+```{r}
+# Decision Tree
+tree_parametros <- tune::select_best(tunado_treeGalac,"rmse")
+wf_treeGalac <- wf_treeGalac %>% tune::finalize_workflow(tree_parametros) 
+tree_fitFinal <- tune::last_fit(wf_treeGalac,divisao_inicialTree)
+
+# Random Forest
+forest_parametros <- tune::select_best(tunado_RfGalac,"rmse")
+wf_RfGalac <- wf_RfGalac %>% tune::finalize_workflow(forest_parametros)
+rf_fitFinal <- tune::last_fit(wf_RfGalac,divisao_inicialRf)
+
+# XGboost
+bst_parametros <- tune::select_best(tunado_Bstgalac,"rmse")
+wf_Bstgalac <- wf_Bstgalac %>% tune::finalize_workflow(bst_parametros)
+bst_fitFinal <- tune::last_fit(wf_Bstgalac,divisao_inicialBoost)
+```
+
+4.1. Extração de valores previstos 
+```{r}
+valores_preditos <- bind_rows(workflowsets::collect_predictions(tree_fitFinal) %>% mutate(modelo = "DT"),
+                              workflowsets::collect_predictions(rf_fitFinal) %>% mutate(modelo = "RF"),
+                              workflowsets::collect_predictions(bst_fitFinal) %>% mutate(modelo = "XGb"))
+
+```
+
+4.2. Gráfico comparativo de RMSE
+```{r}
+valores_preditos %>%
+  dplyr::group_by(modelo) %>% 
+  yardstick::rmse(Valor_Venda,.pred) %>% 
+  ggplot2::ggplot(mapping = ggplot2::aes(x = modelo, y = .estimate))+
+  ggplot2::geom_col(width = 0.333)+
+  ggplot2::coord_flip()+
+  ggplot2::geom_label(ggplot2::aes(label = round(.estimate,3)), hjust = 1.1, color = "darkgreen", size = 4)+
+  ggplot2::labs(title = "Comparação do RMSE dos modelos", y = "RMSE", x = "Modelos")+
+  ggplot2::theme(legend.title = ggplot2::element_blank(), 
+        panel.background = ggplot2::element_rect("white"),
+        legend.position = "none",
+        axis.line = ggplot2::element_line())
+```
+
+4.3. Variáveis importantes
+```{r}
+# Modelo: decision tree
+melhor_varDt <- tree_fitFinal$.workflow[[1]]$fit$fit
+vip::vip(melhor_varDt)
+
+# Modelo: random forest
+melhor_varRf <- rf_fitFinal$.workflow[[1]]$fit$fit
+vip::vip(melhor_varRf)
+
+# Modelo: XGboost
+melhor_varBst <- bst_fitFinal$.workflow[[1]]$fit$fit
+vip::vip(melhor_varBst)
+```
+
+Olhando o modelo com melhor performance, Skywalker ficou perplexo com os resultados. A sustentação da liga estava baseada em vendas feitas por indicação, pelo serviço de recrutamento de tropas e concentrada em uma vendedora chamada Padmé. Uma situação extremamente perigosa de concentração do sucesso dos negócios em alguns poucos elementos. Skywalker percebe que a liga tem um problema sério no processo de vendas. Ele não é constante e previsível como deveria.
+
+A próxima preocupação de Skywalker é: o que podemos esperar da receita da liga para os próximos cliclos? Será capaz de se manter e continuar dando o suporte necessário ao rebeldes na luta contra o império? 
+
+Não perca o próximo capítulo.
+
+
+
+
+
+
+
+
+
+
