@@ -1,0 +1,205 @@
+---
+title: "A liga Galática"
+author: "Luiz dos Santos Almeida Júnior"
+date: "08/11/2021"
+output: word_document
+editor_options: 
+  chunk_output_type: console
+---
+
+APRESENTAÇÃO:
+
+Este é um exercício lúdico baseado em dados e fatos reais, que busca mostrar a aplicação de data science na solução de problemas empresariais. Por esse motivo, nomes, valores e locais foram alterados para proteger a confidencialidade de quem cedeu os dados. Espero que esse material possa ser útil no seu caminho pelo mundo do data science. É também minha muito singela homenagem a uma das obras primas do cinema, que apaixonou, apaixona e apaixonará muitos cinéfilos. "Que a força esteja com você".
+
+EPISÓDIO I - A LIGA GALÁTICA
+PARTE 2 - Tempo, tempo, tempo!
+
+Em uma galáxia muito, muito distante....
+
+No capítulo anterior....
+
+## 0. Base de dados
+
+0.1. Importação da base de dados
+```{r}
+comercio_galatico_st <- read_excel("Base_Dados\\xlsx\\Base_dados.xlsx", col_names = FALSE, skip = 1) %>% 
+  select(...1,...9) %>% rename(Data = ...1, Valor_Vendas = ...9)
+
+comercio_galatico_st$Ano <- year(comercio_galatico_st$Data) %>% as.integer()
+comercio_galatico_st$Mes <- month(comercio_galatico_st$Data) %>% as.integer()
+comercio_galatico_st %>% kableExtra::kable() %>% kableExtra::kable_styling(
+                                                            bootstrap_options = "striped",
+                                                            font_size = 13,
+                                                            full_width = FALSE
+)
+```
+
+0.2. Criação de uma base de dados no formato de série temporal mensal
+```{r}
+# Criando base onde todos os valores apareçam somados mensalmente
+
+comercio_galatico_mensal <- comercio_galatico_st %>% group_by(Mes, Ano) %>% transmute(Vendas_Mensais = sum(Valor_Vendas),
+                                                                                  Data = make_date(Ano, Mes)) %>% unique()
+comercio_galatico_mensal
+```
+
+```{r}
+# Criando a base para séries temporais
+
+comercio_galatico_st2 <- comercio_galatico_mensal[3] %>%  ts(comercio_galatico_mensal, start = c(2016,2), end = c(2020,12), frequency = 12)
+ggplotly(autoplot(comercio_galatico_st2, main = "Vendas Mensais Liga Galática",xlab =" Mês/Ano", ylab = "Valor Vendas"))
+```
+Ao olhar para o gráfico Skywalker não ficou contente com o que viu. Além da alta irregularidade dos valores, o gráfico parece andar de lado, a suspeita é de ser um gráfico estacionário. Para ter uma visão melhor resolveu decompor os valores do gráfico
+
+1. Decomposição da série das vendas
+```{r}
+comercio_galatico_st2 %>% decompose() %>% autoplot()+
+  ggtitle("Decomposição das Vendas")+
+  theme(plot.title = element_text(size = 8))
+```
+Como havia pensando inicialmente, a tendência apresenta-se de forma estacionária e a existência de sazonalidade ficou mais clara. O executivo da liga que ficou para acompanhar e dar o surporte necessário a Skywalker, não entendeu o que aquilo significava. Skywalker explicou que as receitas não irão crescer se nada diferente for feito, e que regularmente existem picos de venda, bem como de vales. Algo precisa ser feito e algo precisa ser feito rápido.
+
+2. 
+
+```{r}
+base_h2o <- comercio_galatico_st[-c(3,4)] %>% transmute(
+  Data = as.Date(Data),
+  Valor_Vendas = Valor_Vendas
+)
+base_h2o
+```
+
+```{r}
+split <- time_series_split(base_h2o, assess = "12 month", cumulative = TRUE )
+```
+
+```{r}
+receita_galatica <- recipes::recipe(Valor_Vendas ~., data = training(split)) %>% 
+ # recipes::step_normalize(all_numeric_predictors())# %>% 
+  timetk::step_timeseries_signature(Data)
+```
+
+```{r}
+treino_galac <- rsample::training(split) %>% recipes::bake(recipes::prep(receita_galatica), .)
+teste_galac <- rsample::testing(split) %>% recipes::bake(recipes::prep(receita_galatica), .)
+```
+
+
+```{r}
+# Conectando
+h2o::h2o.init(
+  nthreads = -1,
+  ip       = "localhost",
+  port     = 54321
+)
+
+```
+
+
+```{r}
+# Montando o modelo
+pilha_modelo <- automl_reg(mode = "regression") %>% 
+  set_engine(
+    engine                     =  "h2o",
+    max_runtime_secs           = 5,
+    max_runtime_secs_per_model = 3,
+    max_models                 = 3,
+    nfolds                     = 5,
+    exclude_algos              = c("DeepLearning"),
+    verbosity                  = NULL,
+    seed                       = 577
+    )
+pilha_modelo
+```
+
+
+```{r}
+modelo_fit_galac <- pilha_modelo %>% 
+  parsnip::fit(Valor_Vendas ~ ., data = treino_galac)
+```
+
+
+```{r}
+modelo_fit_galac
+```
+
+
+```{r}
+previsao <- predict(modelo_fit_galac,teste_galac)
+```
+
+
+```{r}
+# Criando a tabela modelo
+tbl_model_galac <- modeltime::modeltime_table(modelo_fit_galac)
+tbl_model_galac
+```
+
+
+```{r}
+#Calibrando, testando, e configurando a curácia do modelo
+tbl_model_galac %>% 
+  modeltime::modeltime_calibrate(teste_galac) %>% 
+  modeltime::modeltime_forecast(
+    new_data = teste_galac,
+    actual_data = base_h2o,
+    keep_data = TRUE
+  ) %>%  
+  modeltime::plot_modeltime_forecast(
+    .facet_ncol = 1,
+    .interactive = TRUE
+  )
+```
+
+
+```{r}
+#Fazendo previsão
+tabela_previsão <- bind_rows(treino_galac, teste_galac)
+projecao_tabela <- tabela_previsão %>%
+ future_frame(.length_out = 12) %>% 
+  ungroup()
+
+tabela_previsão
+```
+
+```{r}
+tabela_previsão_preparada <- bake(prep(receita_galatica),projecao_tabela)
+```
+
+```{r}
+#Retreinando toda a base de dados
+refit_tbl_model_galac <- tbl_model_galac %>%
+  modeltime_refit(tabela_previsão)
+```
+
+```{r}
+# Visualização da previsão
+refit_tbl_model_galac %>% 
+  modeltime_forecast(
+    new_data = tabela_previsão_preparada,
+    actual_data = tabela_previsão,
+    keep_data = TRUE
+  ) %>%
+  plot_modeltime_forecast(
+    .facet_ncol = 2
+  )
+```
+Infelizmente a situação se mostrou mais complexa e desafiadora do que se poderia esperar. Somente o poder do elemento água não seria o bastante para dar a vitória ao padawan. Ele precisaria mergulhar fundo nos seus ensinamentos e buscar na força, o elemento que lhe permitirá vencer o desafio. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
